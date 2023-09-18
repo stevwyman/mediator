@@ -136,10 +136,18 @@ def check(request, id=None):
             print("ask_id provided and value missing")
             form = AnswerForm({"id":id, "type":"Ask", "provided_value": 0})
             return render(request, "mediate/answer.html", {"form": form})
+        elif id == n.ask_id and n.bid_value is None:
+            print("ask id provided and bid value still missing")
+            result = {"text": "bid value still missing"}
+            return render(request, "mediate/result.html", {"result": result})
+        elif id == n.bid_id and n.ask_value is None:
+            print("bid id provided and ask value still missing")
+            result = {"text": "ask value still missing"}
+            return render(request, "mediate/result.html", {"result": result})
 
     print("strange")
     form = CheckForm()
-    messages.warn(request, "strange")
+    messages.warning(request, "strange")
     return render(request, "mediate/check.html", {"form": form})
 
 
