@@ -1,0 +1,18 @@
+{% extends "mediate/layout.html" %}
+{% load static %}
+
+{% block body %}
+
+{% load django_bootstrap5 %}
+
+<section class="py-5 text-center container">
+    <div class="row py-lg-5">
+        <form action="{% url 'process' %}" method="POST">
+            {% csrf_token %}
+            {% bootstrap_form form %}
+            <button type="submit">Submit</button>
+        </form>
+    </div>
+</section>
+
+{% endblock %}
