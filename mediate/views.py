@@ -63,10 +63,7 @@ def start(request):
                 return_data["share_id"] = m.bid_id
                 return_data["own_id"] = m.ask_id
 
-            messages.info(request, "a negotioan has been initialised")
-
             share_url = request.build_absolute_uri('/mediate/check/' + str(return_data["share_id"]))
-            logger.info(share_url)
 
             qr_image = qrcode.make(share_url, box_size=15)
             qr_image_pil = qr_image.get_image()
