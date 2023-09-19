@@ -14,7 +14,7 @@
 <div class="container">
 
 	<div class="row py-1">
-		<div class="col col-md-8">
+		<div class="col-md-8">
             <p>Select either Bid or Ask and your value. Additionally you can modify the number of days for the offer to stand and for the result to stand. We have re-set 5 days for each to give both parties some time :-)</p>
             <p>Bid - is the price a buyer is willing to pay as a maximum.</p>
             <p>Ask - is the price a seller wants to revieve as a minimum.</p>
@@ -30,9 +30,8 @@
                 <li>optionally change the number of days</li>
                 <li>hit submit</li>
             </ul>
-            
         </div>
-        <div class="col col-md-4">
+        <div class="col-md-4">
             <form action="{% url 'start' %}" method="POST">
                 {% csrf_token %}
                 {% bootstrap_form form %}
