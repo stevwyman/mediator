@@ -7,13 +7,39 @@
 
 <section class="py-5 text-center container">
     <div class="row py-lg-5">
-
-        <form action="{% url 'start' %}" method="POST">
-            {% csrf_token %}
-            {% bootstrap_form form %}
-            <button type="submit">Submit</button>
-        </form>
+        <h1>Begin mediation</h1>
     </div>
 </section>
+
+<div class="container">
+
+	<div class="row py-1">
+		<div class="col col-md-8">
+            <p>Select either Bid or Ask and your value. Additionally you can modify the number of days for the offer to stand and for the result to stand. We have re-set 5 days for each to give both parties some time :-)</p>
+            <p>Bid - is the price a buyer is willing to pay as a maximum.</p>
+            <p>Ask - is the price a seller wants to revieve as a minimum.</p>
+            <br>
+            So this is the process:
+            <ul>
+                <li>choose if you provide an ask or a bid</li>
+                <li>choose your value</li>
+                <ul>
+                    <li>either the maximum when you have choosen 'Ask'</li>
+                    <li>or the minimum when you have choosen 'Bid'</li>
+                </ul>
+                <li>optionally change the number of days</li>
+                <li>hit submit</li>
+            </ul>
+            
+        </div>
+        <div class="col col-md-4">
+            <form action="{% url 'start' %}" method="POST">
+                {% csrf_token %}
+                {% bootstrap_form form %}
+                <button class="btn btn-primary" type="submit">Submit</button>
+            </form>
+        </div>
+    </div>
+</div>
 
 {% endblock %}

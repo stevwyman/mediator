@@ -3,30 +3,35 @@
 <!DOCTYPE html>
 <html lang="en">
     <head>
-        <title>{% block title %}Data{% endblock %}</title>
+        <title>{% block title %}Mediation{% endblock %}</title>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <link rel="icon" type="image/x-icon" href="{% static 'data/favicon.ico' %}">
+        <link rel="icon" type="image/x-icon" href="{% static 'mediate/favicon.ico' %}">
         {% load django_bootstrap5 %}
         {% bootstrap_css %}
         {% bootstrap_javascript %}
+        <link href="{% static 'mediate/styles.css' %}" rel="stylesheet">
     </head>
     <body>
 
         <!-- when using navbar-fixed-top, make sure to use body { padding-top: 70px; } -->
         <nav class="navbar navbar-expand-lg navbar-light bg-primary text-info">
             <div class="container-fluid">
-                <a href="https://wyca-analytics.com" target="_blank" class=" navbar-brand">
-                    <img src="/data/static/data/web-logo-white.png" alt="wyca-analytics.com" height="36">
+                <a href="/mediate" alt="Stev Wyman Mediation" target="_blank" class=" navbar-brand">
+                    <img src="/mediate/static/mediate/sw_mediation.png" alt="stev wyman mediation" height="36">
                 </a>
 
                 <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarScroll" aria-controls="navbarScroll" aria-expanded="false" aria-label="Toggle navigation">
                     <span class="navbar-toggler-icon"></span>
                 </button>
+                
                 <div class="collapse navbar-collapse" id="navbarScroll">
                     <ul class="navbar-nav me-auto my-2 my-lg-0 navbar-nav-scroll" style="--bs-scroll-height: 100px;">
                         <li class="nav-item">
-                            <a class="nav-link active" aria-current="page" href="{% url 'start' %}">Home</a>
+                            <a class="nav-link active" aria-current="page" href="{% url 'start' %}">Start</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" aria-current="page" href="{% url 'check' %}">Check</a>
                         </li>
                     </ul>
                 </div>
@@ -44,13 +49,13 @@
         <div class="container">
             <footer class="py-3 my-4">
               <ul class="nav justify-content-center border-bottom pb-3 mb-3">
-                <li class="nav-item"><a href="#" class="nav-link px-2 text-muted">Home</a></li>
-                <li class="nav-item"><a href="#" class="nav-link px-2 text-muted">Features</a></li>
+                <li class="nav-item"><a href="https://stevwyman.com" class="nav-link px-2 text-muted">Home</a></li>
+                <li class="nav-item"><a href="/mediate" class="nav-link px-2 text-muted">Mediation</a></li>
                 <li class="nav-item"><a href="#" class="nav-link px-2 text-muted">Pricing</a></li>
                 <li class="nav-item"><a href="#" class="nav-link px-2 text-muted">FAQs</a></li>
                 <li class="nav-item"><a href="#" class="nav-link px-2 text-muted">About</a></li>
               </ul>
-              <p class="text-center text-muted">© 2023 wyca-analytics</p>
+              <p class="text-center text-muted">© 2023 stev wyman</p>
             </footer>
         </div>
 

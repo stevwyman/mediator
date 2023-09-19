@@ -1,4 +1,37 @@
+{% extends "mediate/layout.html" %}
+{% load static %}
 
-your ID to look up the result: {{ return_data.own_id }}
-<br><br>
-use this id for the other side: {{ return_data.share_id }}
+{% block body %}
+
+{% load django_bootstrap5 %}
+
+<section class="py-5 text-center container">
+    <div class="row py-lg-5">
+        <h1>Confirmation</h1>
+    </div>
+</section>
+
+<div class="container">
+
+	<div class="row py-1">
+		<div class="col col-md-8">
+            <p>We have create a new negotiation based on your input.</p>
+            <p>As we only provide access to the data by the below two ids, it is essential that you note them down:</p>
+            <table>
+                <tr>
+                    <td>your ID to look up the result:</td>
+                    <td><a href="{% url 'check' %}/{{ return_data.own_id }}">{{ return_data.own_id }}</a></td>
+                </tr>
+                <tr>
+                    <td>use this id for the other side:</td>
+                    <td><a href="{% url 'check' %}/{{ return_data.share_id }}">{{ return_data.share_id }}</a></td>
+                </tr>
+            </table>
+        </div>
+        <div class="col col-md-4">
+            <img class="img-fluid" src="data:image/png;base64, {{ return_data.image|safe }}" alt="share id">
+        </div>
+    </div>
+</div>
+
+{% endblock %}

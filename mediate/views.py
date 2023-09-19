@@ -1,17 +1,25 @@
+import base64
+import uuid
+import qrcode
+
 from django.contrib import messages
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
 
 from .forms import InitialForm, CheckForm, AnswerForm
 from .models import Negotiation
 
-import uuid
+from io import BytesIO
+
+from logging import getLogger
+
+logger = getLogger(__name__)
 
 def index(request):
-    return HttpResponse("Hello, world. You're at the polls index.")
+    return render(request, "mediate/index.html")
 
 
 def start(request):
@@ -21,7 +29,7 @@ def start(request):
         share_id: the id to be shared with the other side
     """
     if request.method == "GET":
-        form = InitialForm()
+        form = InitialForm(initial={"duration_input":5, "duration_display": 5})
         return render(request, "mediate/start.html", {"form": form})
 
     elif request.method == "POST":
@@ -55,7 +63,16 @@ def start(request):
                 return_data["share_id"] = m.bid_id
                 return_data["own_id"] = m.ask_id
 
-            messages.info(request, "created :-)")
+            messages.info(request, "a negotioan has been initialised")
+
+            share_url = request.build_absolute_uri('/mediate/check/' + str(return_data["share_id"]))
+            logger.info(share_url)
+
+            qr_image = qrcode.make(share_url, box_size=15)
+            qr_image_pil = qr_image.get_image()
+            stream = BytesIO()
+            qr_image_pil.save(stream, format="PNG")
+            return_data["image"] = base64.b64encode(stream.getvalue()).decode("utf-8").replace('\n', '')     
 
         return render(
             request, "mediate/confirmation.html", {"return_data": return_data}
@@ -64,90 +81,83 @@ def start(request):
 
 def check(request, id=None):
     """
-    this entry point provides access to the mediation core process
-        1. when an "id" is provided in the url -> forward to the validation function
-        2. no id in url, but "GET", provide a page to enter the id "check.html"
-        3. "POST" -> forward to the validation function
+    This is the entry for checking the different IDs. Threre are basically three use cases:
+        1. The initiator checks his/her own id
+            a. either the partner has not provided his/her input -> "data missing"
+        2. The partner checks his/her (shared) id
+            a. if not data has been provided -> forward to input page
+        b. the partner has provided input -> negotiation is possible or not
+
+    As entry, we have either 
+        1. a page to provide a value
+        2. a link, hence part of the url
+        3. a POST request with the id as paramater
     """
 
-    # check if an id is provided in the url
-    if id is not None:
-        _id = id
-    else:
-        # check if an id is provided (by shortcut url from confirmation)
-        _id = request.GET.get("id")
-
-    print(f"requesting check for {_id}")
-
+    # for now the negotiation in null
     n = None
-    if _id is not None:
-        id = uuid.UUID(_id)
+
+    # in a first step, check if the id has been provided
+    # 1. as link in a GET request
+    if request.method == "GET" and id is not None:
         try:
+            id = uuid.UUID(id)
             n = Negotiation.objects.filter(Q(bid_id=id) | Q(ask_id=id)).first()
-        except ObjectDoesNotExist as odne:
-            messages.warn(request, f"Not Found: {odne}")
-            print("not found")
-            form = CheckForm()
-            return render(request, "mediate/check.html", {"form": form})
+        except (ValueError, ObjectDoesNotExist) as e:
+            messages.warning(request, f"{id} not found")
+            logger.debug(f"{id} was provided as part of the url")
 
-    if n is None:
-        # check the anwser from the check.html page
-        if request.method == "POST":
-            form = CheckForm(request.POST)
-            if form.is_valid():
-                id = form.cleaned_data["id"]
-                try:
-                    n = Negotiation.objects.filter(Q(bid_id=id) | Q(ask_id=id)).first()
-                    print(f"found: {n}")
-                except ObjectDoesNotExist as odne:
-                    print(odne)
-                    messages.warn(request, f"Not Found: {odne}")
-                    # provide a page, so the user can enter his/her id
-                    form = CheckForm()
-                    return render(request, "mediate/check.html", {"form": form})
-
+    # 2. as parameter in a POST request
+    elif request.method == "POST":
+        form = CheckForm(request.POST)
+        if form.is_valid():
+            id = form.cleaned_data["id"]
+            try:
+                n = Negotiation.objects.filter(Q(bid_id=id) | Q(ask_id=id)).first()
+            except ObjectDoesNotExist as odne:
+                messages.warning(request, f"{id} not found")
+                logger.debug(f"{id} was provided as part of a POST request")
         else:
-            # provide a page, so the user can enter his/her id
-            form = CheckForm()
-            return render(request, "mediate/check.html", {"form": form})
+            messages.warning(request, "invalid data")
 
-    # reaching this point means we have a valid negotiation object
+    # if either one of the above has found the negotiation, process it
+    if n is not None:
 
-    # check the id for further steps
-    # 1. check if the negotiation is complete
-    if n.bid_value is not None and n.ask_value is not None:
-        print("data complete")
-        result = {"text": "data complete"}
-        ## TODO: check and provide result
-        if n.bid_value > n.ask_value:
-            result = {"text": "negotiation is possible"}
-        else:
-            result = {"text": "negotiation is not possible"}
+        # 1. check if the negotiation is complete
+        if n.bid_value is not None and n.ask_value is not None:
+            logger.debug("negotiation data complete")
+            result = {"text": "data complete"}
             
-        return render(request, "mediate/result.html", {"result": result})
-    # 2. if not complete, find out what is missing
-    else:
-        print(id)
-        if id == n.bid_id and n.bid_value is None:
-            print("bid_id provided and value missing")
-            form = AnswerForm(id=id, type=('Bid', 'Bid'))
-            return render(request, "mediate/answer.html", {"form": form})
-        elif id == n.ask_id and n.ask_value is None:
-            print("ask_id provided and value missing")
-            form = AnswerForm({"id":id, "type":"Ask", "provided_value": 0})
-            return render(request, "mediate/answer.html", {"form": form})
-        elif id == n.ask_id and n.bid_value is None:
-            print("ask id provided and bid value still missing")
-            result = {"text": "bid value still missing"}
+            if n.bid_value > n.ask_value:
+                result = {"text": "negotiation is possible"}
+            else:
+                result = {"text": "negotiation is not possible"}
+            
+            logger.debug(result)
             return render(request, "mediate/result.html", {"result": result})
-        elif id == n.bid_id and n.ask_value is None:
-            print("bid id provided and ask value still missing")
-            result = {"text": "ask value still missing"}
-            return render(request, "mediate/result.html", {"result": result})
+        # 2. if not complete, find out what is missing
+        else:
+            logger.debug("negotiation data is not yet complete")
+            if id == n.bid_id and n.bid_value is None:
+                logger.debug("bid_id provided and value missing")
+                form = AnswerForm({"id":id, "type":"Bid", "provided_value": 0})
+                return render(request, "mediate/answer.html", {"form": form})
+            elif id == n.ask_id and n.ask_value is None:
+                logger.debug("ask_id provided and value missing")
+                form = AnswerForm({"id":id, "type":"Ask", "provided_value": 0})
+                return render(request, "mediate/answer.html", {"form": form})
+            elif id == n.ask_id and n.bid_value is None:
+                logger.debug("ask id provided and bid value still missing")
+                result = {"text": "bid value still missing"}
+                return render(request, "mediate/result.html", {"result": result})
+            elif id == n.bid_id and n.ask_value is None:
+                logger.debug("bid id provided and ask value still missing")
+                result = {"text": "ask value still missing"}
+                return render(request, "mediate/result.html", {"result": result})
 
-    print("strange")
+    
     form = CheckForm()
-    messages.warning(request, "strange")
+    logger.debug("no negotiation found")
     return render(request, "mediate/check.html", {"form": form})
 
 
@@ -166,12 +176,15 @@ def process(request):
                 n = Negotiation.objects.get(ask_id=id)
                 n.ask_value = provided_value
                 n.save()
-                print("updated ask value")
+                logger.debug("updated ask value")
                 return HttpResponseRedirect(reverse("check", kwargs={"id": str(id)}))
             elif type == "Bid":
                 n = Negotiation.objects.get(bid_id=id)
                 n.bid_value = provided_value
                 n.save()
-                print("update bid value")
+                logger.debug("update bid value")
                 return HttpResponseRedirect(reverse("check", kwargs={"id": id}))
                 
+    form = CheckForm()
+    logger.debug("no negotiation found")
+    return render(request, "mediate/check.html", {"form": form})
