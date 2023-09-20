@@ -18,6 +18,8 @@ from logging import getLogger
 
 logger = getLogger(__name__)
 
+from PIL import Image
+
 def index(request):
     return render(request, "mediate/index.html")
 
@@ -64,13 +66,55 @@ def start(request):
                 return_data["own_id"] = m.ask_id
 
             share_url = request.build_absolute_uri('/mediate/check/' + str(return_data["share_id"]))
+            
+            
+            # use this logo when generating the qrcode
+            logo = Image.open("sw.jpg")
+            
+            # taking base width
+            basewidth = 100
+            
+            # adjust image size
+            wpercent = (basewidth/float(logo.size[0]))
+            hsize = int((float(logo.size[1])*float(wpercent)))
+            logo = logo.resize((basewidth, hsize), Image.LANCZOS)
+            QRcode = qrcode.QRCode(
+                error_correction=qrcode.constants.ERROR_CORRECT_H
+            )
 
+            # adding URL or text to QRcode
+            QRcode.add_data(share_url)
+            
+            # generating QR code
+            QRcode.make()
+            
+            # color for the qr code
+            fill_color = (3,103,166)
+
+            # qr code background color
+            back_color = "white"
+
+            # adding color to QR code
+            qr_image_pil = QRcode.make_image(
+                fill_color=fill_color, back_color=back_color).convert("RGB")
+            
+            # set size of QR code
+            pos = ((qr_image_pil.size[0] - logo.size[0]) // 2,
+                (qr_image_pil.size[1] - logo.size[1]) // 2)
+            qr_image_pil.paste(logo, pos)
+
+            stream = BytesIO()
+            qr_image_pil.save(stream, format="PNG")
+            return_data["image"] = base64.b64encode(stream.getvalue()).decode("utf-8").replace('\n', '')     
+            
+            
+            """
             qr_image = qrcode.make(share_url, box_size=15)
             qr_image_pil = qr_image.get_image()
             stream = BytesIO()
             qr_image_pil.save(stream, format="PNG")
             return_data["image"] = base64.b64encode(stream.getvalue()).decode("utf-8").replace('\n', '')     
-
+            """
         return render(
             request, "mediate/confirmation.html", {"return_data": return_data}
         )

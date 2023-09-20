@@ -16,4 +16,4 @@ WORKDIR /usr/src/app
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
-CMD ["./manage.py", "runserver", "0.0.0.0:8001"]  # as before
+CMD ["./manage.py", "runserver", "0.0.0.0:8002"]  # as before

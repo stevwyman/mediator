@@ -15,23 +15,41 @@
 
 	<div class="row py-1">
 		<div class="col-md-8">
-            <p>We have create a new negotiation based on your input.</p>
-            <p>As we only provide access to the data by the below two ids, it is essential that you note them down:</p>
-            <table>
-                <tr>
-                    <td>your ID to look up the result:</td>
-                    <td><a href="{% url 'check' %}/{{ return_data.own_id }}">{{ return_data.own_id }}</a></td>
-                </tr>
-                <tr>
-                    <td>use this id for the other side:</td>
-                    <td><a href="{% url 'check' %}/{{ return_data.share_id }}">{{ return_data.share_id }}</a></td>
-                </tr>
-            </table>
+            <p>We have created a new negotiation based on your input.</p>
+            <p class="lead">As we only provide access to the data by the below two ids, it is essential that you note them down. There is no way to retrieve them once the data has been entered.</p>
+            <hr>
+            <div>
+                <div>This is <b>your code</b>. Either save/use the link or enter the id under <a href="{% url 'check' %}">check</a></div>
+                <div class="row">
+                    <div class="col-md-8 py-1"><a href="{% url 'check' %}/{{ return_data.own_id }}">{{ return_data.own_id }}</a></div>
+                    <div class="col-md-4 py-1"><a class="btn btn-sm btn-outline-dark" href="#" onclick="copyURI('{{ return_data.own_id }}')">Copy ID to clipboard</a></div>
+                </div>
+            </div>
+            <hr>
+            <div>
+                <div>This is the code for <b>your partner</b>. Either share the link or let them enter the id under <a href="{% url 'check' %}">check</a>. Or share the qrcode.</div>
+                <div class="row">
+                    <div class="col-md-8 py-1"><a href="{% url 'check' %}/{{ return_data.share_id }}">{{ return_data.share_id }}</a></div>
+                    <div class="col-md-4 py-1"><a class="btn btn-sm btn-outline-dark" href="#" onclick="copyURI('{{ return_data.share_id }}')">Copy ID to clipboard</a></div>
+                </div>
+            </div>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-4 text-center">
+            <h3>share this code</h3>
             <img class="img-fluid" src="data:image/png;base64, {{ return_data.image|safe }}" alt="share id">
         </div>
     </div>
 </div>
+
+<script>
+    function copyURI(evt) {
+    //evt.preventDefault();
+    navigator.clipboard.writeText(evt).then(() => {
+      alert("copied: " + evt)
+    }, () => {
+      alert("could not copy")
+    });
+}
+</script>
 
 {% endblock %}
