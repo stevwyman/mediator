@@ -7,12 +7,26 @@
 
 <section class="py-5 text-center container">
     <div class="row py-lg-5">
-        <form action="{% url 'process' %}" method="POST">
-            {% csrf_token %}
-            {% bootstrap_form form %}
-            <button type="submit">Submit</button>
-        </form>
+        <h1>Answer</h1>
     </div>
 </section>
+
+<div class="container">
+
+	<div class="row py-1">
+		<div class="col-md-8">
+            Please provide here your answer.
+            ##TODO
+            provide some input as of Bid/Ask
+        </div>
+        <div class="col-md-4">
+            <form action="{% url 'process' %}" method="POST">
+                {% csrf_token %}
+                {% bootstrap_form form %}
+                <button type="submit">Submit</button>
+            </form>
+        </div>
+    </div>
+</div>
 
 {% endblock %}
