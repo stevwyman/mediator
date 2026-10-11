@@ -1,19 +1,59 @@
-# For more information, please refer to https://aka.ms/vscode-docker-python
-FROM python:3.11-slim
+# ==========================================
+# Stage 1️⃣ Builder
+# ==========================================
+FROM registry.access.redhat.com/hi/python:3.14-builder AS builder
+USER root
+WORKDIR /app
 
-EXPOSE 8002
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-# Keeps Python from generating .pyc files in the container
-ENV PYTHONDONTWRITEBYTECODE=1
+# Install pip requirements directly into the venv
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Turns off buffering for easier container logging
-ENV PYTHONUNBUFFERED=1
+# Copy application code
+COPY . .
 
-COPY . /usr/src/app
+# Compile Django translations (this requires gettext)
+# We do this here so the final image only gets the compiled .mo files
+RUN SECRET_KEY=build-time-only-not-for-runtime \
+    ALLOWED_HOSTS=localhost 
+
+RUN mkdir -p /data/mediate
+
+# ==========================================
+# Stage 2️⃣ Final (Rootless & Hardened)
+# ==========================================
+FROM registry.access.redhat.com/hi/python:3.14 AS final
+
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+USER root
 WORKDIR /usr/src/app
 
-# Install pip requirements
-RUN pip install --upgrade pip
-RUN pip install -r requirements.txt
+# Copy the venv from builder
+COPY --from=builder --chown=1001:0 /opt/venv /opt/venv
 
-CMD ["./manage.py", "runserver", "0.0.0.0:8002"]  # as before
+# Copy the application code (now containing compiled translations)
+COPY --from=builder --chown=1001:0 /app /usr/src/app
+
+# Set up the volume mount point with correct permissions
+COPY --from=builder --chown=1001:0 /data/mediate /data/mediate
+
+# Switch to the default rootless user provided by Red Hat
+USER 1001
+
+VOLUME /data/mediate
+
+# Execute the entrypoint via the venv's Python binary
+ENTRYPOINT ["python", "docker-entrypoint.py"]
+
+#CMD ["python", "manage.py", "runserver", "0.0.0.0:8003"]
+CMD ["gunicorn", "mediator.wsgi:application", "--bind", "0.0.0.0:8003", "--workers", "3", "--access-logfile", "-", "--error-logfile", "-"]

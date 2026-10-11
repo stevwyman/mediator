@@ -10,24 +10,75 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
+import os
+
+from django.utils.translation import gettext_lazy as _
+from dotenv import load_dotenv
 from pathlib import Path
+
+from logging import getLogger
+
+logger = getLogger(__name__)
+
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 # Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
-
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-a=w8cp^23yeyv#t5^n1@ey2-fd%uv2yccb#fci@we$oz6(0%c4"
+# See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'False').lower() in ('1', 'true', 'yes')
+# True while running manage.py test / pytest (relaxes some fail-closed checks).
+TESTING = any(
+    arg == 'test' or arg.endswith('pytest') or 'pytest' in arg
+    for arg in __import__('sys').argv
+)
 
-ALLOWED_HOSTS = ["www.stevwyman.com", "stevwyman.com", "127.0.0.1"]
+# SECURITY WARNING: keep the secret key used in production secret!
+SECRET_KEY = os.getenv('SECRET_KEY')
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = "django-insecure-dev-only-change-me"
+    else:
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured("SECRET_KEY must be set when DEBUG is False")
+elif not DEBUG and str(SECRET_KEY).startswith("django-insecure"):
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured("Insecure SECRET_KEY is not allowed when DEBUG is False")
 
-CSRF_TRUSTED_ORIGINS = ["https://stevwyman.com"]
+ah_raw = os.getenv('ALLOWED_HOSTS')
+if ah_raw:
+    # split, strip Leerzeichen, entferne leere Einträge
+    ALLOWED_HOSTS = [origin.strip() for origin in ah_raw.split(',') if origin.strip()]
+else:
+    ALLOWED_HOSTS = []
+if not DEBUG and not ALLOWED_HOSTS:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured("ALLOWED_HOSTS must be set when DEBUG is False")
+logger.info("--- Allowed Hosts ---")
+logger.info(ALLOWED_HOSTS)
+logger.info("---------------------")
+
+csrf_raw = os.getenv('CSRF_TRUSTED_ORIGINS')
+if csrf_raw:
+    # split, strip Leerzeichen, entferne leere Einträge
+    CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in csrf_raw.split(',') if origin.strip()]
+else:
+    CSRF_TRUSTED_ORIGINS = []
+
+logger.info("--- CSRF Hosts ------")
+logger.info(CSRF_TRUSTED_ORIGINS)
+logger.info("---------------------")
+
+
+INTERNAL_IPS = [
+    # ...
+    "127.0.0.1",
+    # ...
+]
 
 
 # Application definition
@@ -45,6 +96,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -77,10 +129,16 @@ WSGI_APPLICATION = "mediator.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
+if os.path.exists('/data/mediate'):
+    MEDIATE = Path('/data/mediate')
+else:
+    # Safe fallback for local development outside of Docker
+    MEDIATE = BASE_DIR
+
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': MEDIATE / 'db.sqlite3',
     }
 }
 
@@ -117,9 +175,47 @@ USE_TZ = True
 
 
 # Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/4.2/howto/static-files/
+# https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = "mediate/static/"
+# ------------------------------------------------------------------
+# Statische Dateien
+# ------------------------------------------------------------------
+STATIC_URL = '/static/'
+STATIC_ROOT = MEDIATE / 'staticfiles'         # für collectstatic (Produktiv)
+STATICFILES_DIRS = [BASE_DIR / 'static']      # dein lokaler Entwicklungs-Ordner
+
+# ------------------------------------------------------------------
+# WhiteNoise (empfohlen)
+# ------------------------------------------------------------------
+# Komprimierte (gzip/br) und versionierte Dateien benutzen:
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+# ------------------------------------------------------------------
+# Security headers / cookies
+# ------------------------------------------------------------------
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_BROWSER_XSS_FILTER = True  # obsolete in modern browsers; harmless if set
+
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 14  # 14 days
+SESSION_EXPIRE_AT_BROWSER_CLOSE = False
+
+# Production-only TLS hardening (keep local HTTP working when DEBUG=True)
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    # Required behind TLS-terminating proxies (Docker/nginx/Traefik/Caddy/LB).
+    # Without this, Django always sees HTTP and SECURE_SSL_REDIRECT loops forever.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    USE_X_FORWARDED_HOST = True
+
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field

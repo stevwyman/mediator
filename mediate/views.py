@@ -122,7 +122,7 @@ def start(request):
 
 def check(request, id=None):
     """
-    This is the entry for checking the different IDs. Threre are basically three use cases:
+    This is the entry for checking the different IDs. There are basically three use cases:
         1. The initiator checks his/her own id
             a. either the partner has not provided his/her input -> "data missing"
         2. The partner checks his/her (shared) id
@@ -132,7 +132,7 @@ def check(request, id=None):
     As entry, we have either 
         1. a page to provide a value
         2. a link, hence part of the url
-        3. a POST request with the id as paramater
+        3. a POST request with the id as parameter
     """
 
     # for now the negotiation in null
@@ -169,7 +169,7 @@ def check(request, id=None):
             logger.debug("negotiation data complete")
             result = {"text": "data complete"}
             
-            if n.bid_value > n.ask_value:
+            if n.bid_value >= n.ask_value:
                 result = {"text": "negotiation is possible"}
             else:
                 result = {"text": "negotiation is not possible"}

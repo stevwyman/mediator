@@ -1,2 +1,5 @@
 django-bootstrap5
 qrcode[pil]
+gunicorn
+whitenoise
+python-dotenv
