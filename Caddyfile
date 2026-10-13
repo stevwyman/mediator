@@ -1,0 +1,3 @@
+mediate.example.com {
+	reverse_proxy mediator:8003
+}
