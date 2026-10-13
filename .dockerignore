@@ -14,3 +14,4 @@ staticfiles
 data
 media
 .idea
+.DS_Store
