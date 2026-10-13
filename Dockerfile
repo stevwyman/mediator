@@ -55,5 +55,7 @@ VOLUME /data/mediate
 # Execute the entrypoint via the venv's Python binary
 ENTRYPOINT ["python", "docker-entrypoint.py"]
 
+# One worker keeps SQLite writes serialized. The access log omits the path
+# so negotiation codes in /mediate/check/<id> are not written to stdout.
 #CMD ["python", "manage.py", "runserver", "0.0.0.0:8003"]
-CMD ["gunicorn", "mediator.wsgi:application", "--bind", "0.0.0.0:8003", "--workers", "3", "--access-logfile", "-", "--error-logfile", "-"]
+CMD ["gunicorn", "mediator.wsgi:application", "--bind", "0.0.0.0:8003", "--workers", "1", "--access-logfile", "-", "--error-logfile", "-", "--access-logformat", "%(h)s %(t)s \"%(m)s\" %(s)s %(b)s"]

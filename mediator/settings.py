@@ -95,6 +95,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "mediate.middleware.TrustedProxyMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -193,6 +194,9 @@ STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 # ------------------------------------------------------------------
 # Security headers / cookies
 # ------------------------------------------------------------------
+# same-origin keeps negotiation codes off third-party Referer headers and
+# still sends a real Origin on form posts, which CSRF checking requires.
+SECURE_REFERRER_POLICY = "same-origin"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_BROWSER_XSS_FILTER = True  # obsolete in modern browsers; harmless if set
 
@@ -203,6 +207,16 @@ CSRF_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_AGE = 60 * 60 * 24 * 14  # 14 days
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 
+# Direct peers allowed to set X-Forwarded-Proto and X-Forwarded-Host.
+# Leave empty when Gunicorn is reached directly. Behind a TLS-terminating
+# proxy, set this to that proxy's address and make the proxy overwrite both
+# headers itself. Untrusted clients cannot spoof the host baked into share links.
+_proxy_raw = os.getenv("TRUSTED_PROXY_IPS", "")
+TRUSTED_PROXY_IPS = [ip.strip() for ip in _proxy_raw.split(",") if ip.strip()]
+if TRUSTED_PROXY_IPS:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    USE_X_FORWARDED_HOST = True
+
 # Production-only TLS hardening (keep local HTTP working when DEBUG=True)
 if not DEBUG:
     SECURE_SSL_REDIRECT = True
@@ -211,10 +225,6 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
-    # Required behind TLS-terminating proxies (Docker/nginx/Traefik/Caddy/LB).
-    # Without this, Django always sees HTTP and SECURE_SSL_REDIRECT loops forever.
-    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-    USE_X_FORWARDED_HOST = True
 
 
 # Default primary key field type
@@ -227,14 +237,17 @@ LOGGING = {
     "disable_existing_loggers": False,
     "formatters": {
         "extended": {
+            "()": "mediate.logging.RedactingFormatter",
             "format": "{levelname} {asctime} {name} {funcName} {process:d} {thread:d} {message}",
             "style": "{",
         },
         "verbose": {
+            "()": "mediate.logging.RedactingFormatter",
             "format": "{levelname} {asctime} {name} {funcName}: {message}",
             "style": "{",
         },
         "simple": {
+            "()": "mediate.logging.RedactingFormatter",
             "format": "{levelname} {message}",
             "style": "{",
         },
@@ -248,5 +261,17 @@ LOGGING = {
     "root": {
         "handlers": ["console"],
         "level": "INFO",
+    },
+    "loggers": {
+        "django.server": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
     },
 }

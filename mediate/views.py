@@ -1,231 +1,226 @@
 import base64
 import uuid
-import qrcode
+from io import BytesIO
+from logging import getLogger
 
+import qrcode
+from django.conf import settings
 from django.contrib import messages
-from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q
 from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
+from PIL import Image
 
-from .forms import InitialForm, CheckForm, AnswerForm
+from .forms import AnswerForm, CheckForm, InitialForm
 from .models import Negotiation
-
-from io import BytesIO
-
-from logging import getLogger
 
 logger = getLogger(__name__)
 
-from PIL import Image
+NOT_FOUND = "No negotiation matches that code."
+INVALID_CODE = "That code is not valid."
+EXPIRED_INPUT = "This negotiation has expired."
+EXPIRED_RESULT = "The result is no longer available."
+ALREADY_SUBMITTED = "This response was already submitted."
+
 
 def index(request):
+    Negotiation.purge_expired()
     return render(request, "mediate/index.html")
 
 
 def start(request):
     """
-    as GET: prepare the form to input the initial data, returns to ids
-        own_id: to lookup the result or check if the other side has already entered data
-        share_id: the id to be shared with the other side
+    Collect the first reserve price and return the two access codes.
+
+    own_id looks up this party's side. share_id is the code given to the
+    other party. The row is saved only after the share QR code is built,
+    so a failure here does not leave a negotiation nobody can open.
     """
-    if request.method == "GET":
-        form = InitialForm(initial={"duration_input":5, "duration_display": 5})
+    Negotiation.purge_expired()
+    if request.method != "POST":
+        form = InitialForm(initial={"duration_input": 5, "duration_display": 5})
         return render(request, "mediate/start.html", {"form": form})
 
-    elif request.method == "POST":
-        form = InitialForm(request.POST)
-        if form.is_valid():
-            type = form.cleaned_data["type"]
-            provided_value = form.cleaned_data["provided_value"]
-            duration_input = form.cleaned_data["duration_input"]
-            duration_display = form.cleaned_data["duration_display"]
+    form = InitialForm(request.POST)
+    if not form.is_valid():
+        return render(request, "mediate/start.html", {"form": form})
 
-            if type == "Bid":
-                m = Negotiation(
-                    bid_value=provided_value,
-                    duration_display=duration_display,
-                    duration_input=duration_input,
-                )
-            else:
-                m = Negotiation(
-                    ask_value=provided_value,
-                    duration_display=duration_display,
-                    duration_input=duration_input,
-                )
-
-            m.save()
-
-            return_data = dict()
-            if type == "Bid":
-                return_data["share_id"] = m.ask_id
-                return_data["own_id"] = m.bid_id
-            else:
-                return_data["share_id"] = m.bid_id
-                return_data["own_id"] = m.ask_id
-
-            share_url = request.build_absolute_uri('/mediate/check/' + str(return_data["share_id"]))
-            
-            
-            # use this logo when generating the qrcode
-            logo = Image.open("sw.jpg")
-            
-            # taking base width
-            basewidth = 100
-            
-            # adjust image size
-            wpercent = (basewidth/float(logo.size[0]))
-            hsize = int((float(logo.size[1])*float(wpercent)))
-            logo = logo.resize((basewidth, hsize), Image.LANCZOS)
-            QRcode = qrcode.QRCode(
-                error_correction=qrcode.constants.ERROR_CORRECT_H
-            )
-
-            # adding URL or text to QRcode
-            QRcode.add_data(share_url)
-            
-            # generating QR code
-            QRcode.make()
-            
-            # color for the qr code
-            fill_color = (3,103,166)
-
-            # qr code background color
-            back_color = "white"
-
-            # adding color to QR code
-            qr_image_pil = QRcode.make_image(
-                fill_color=fill_color, back_color=back_color).convert("RGB")
-            
-            # set size of QR code
-            pos = ((qr_image_pil.size[0] - logo.size[0]) // 2,
-                (qr_image_pil.size[1] - logo.size[1]) // 2)
-            qr_image_pil.paste(logo, pos)
-
-            stream = BytesIO()
-            qr_image_pil.save(stream, format="PNG")
-            return_data["image"] = base64.b64encode(stream.getvalue()).decode("utf-8").replace('\n', '')     
-            
-            
-            """
-            qr_image = qrcode.make(share_url, box_size=15)
-            qr_image_pil = qr_image.get_image()
-            stream = BytesIO()
-            qr_image_pil.save(stream, format="PNG")
-            return_data["image"] = base64.b64encode(stream.getvalue()).decode("utf-8").replace('\n', '')     
-            """
-        return render(
-            request, "mediate/confirmation.html", {"return_data": return_data}
+    side = form.cleaned_data["type"]
+    negotiation = Negotiation.begin(
+        side=side,
+        value=form.cleaned_data["provided_value"],
+        duration_input=form.cleaned_data["duration_input"],
+        duration_display=form.cleaned_data["duration_display"],
+    )
+    own_id, share_id = negotiation.party_ids(side)
+    share_url = request.build_absolute_uri(f"/mediate/check/{share_id}")
+    try:
+        image = build_share_qr(share_url)
+    except Exception:
+        logger.exception("Could not build the share QR code")
+        form.add_error(
+            None,
+            "Could not create the share code. Nothing was saved. Please try again.",
         )
+        return render(request, "mediate/start.html", {"form": form})
+
+    negotiation.save()
+    return render(
+        request,
+        "mediate/confirmation.html",
+        {
+            "return_data": {
+                "share_id": share_id,
+                "own_id": own_id,
+                "image": image,
+            }
+        },
+    )
 
 
 def check(request, id=None):
     """
-    This is the entry for checking the different IDs. There are basically three use cases:
-        1. The initiator checks his/her own id
-            a. either the partner has not provided his/her input -> "data missing"
-        2. The partner checks his/her (shared) id
-            a. if not data has been provided -> forward to input page
-        b. the partner has provided input -> negotiation is possible or not
+    Look up a negotiation by one party's code.
 
-    As entry, we have either 
-        1. a page to provide a value
-        2. a link, hence part of the url
-        3. a POST request with the id as parameter
+    A code whose window has closed is deleted. A finished negotiation
+    returns only whether a deal is possible.
     """
+    token, early = _token_from_request(request, id)
+    if early is not None:
+        Negotiation.purge_expired()
+        return early
+    if token is None:
+        Negotiation.purge_expired()
+        return render(request, "mediate/check.html", {"form": CheckForm()})
 
-    # for now the negotiation in null
-    n = None
-
-    # in a first step, check if the id has been provided
-    # 1. as link in a GET request
-    if request.method == "GET" and id is not None:
-        try:
-            id = uuid.UUID(id)
-            n = Negotiation.objects.filter(Q(bid_id=id) | Q(ask_id=id)).first()
-        except (ValueError, ObjectDoesNotExist) as e:
-            messages.warning(request, f"{id} not found")
-            logger.debug(f"{id} was provided as part of the url")
-
-    # 2. as parameter in a POST request
-    elif request.method == "POST":
-        form = CheckForm(request.POST)
-        if form.is_valid():
-            id = form.cleaned_data["id"]
-            try:
-                n = Negotiation.objects.filter(Q(bid_id=id) | Q(ask_id=id)).first()
-            except ObjectDoesNotExist as odne:
-                messages.warning(request, f"{id} not found")
-                logger.debug(f"{id} was provided as part of a POST request")
-        else:
-            messages.warning(request, "invalid data")
-
-    # if either one of the above has found the negotiation, process it
-    if n is not None:
-
-        # 1. check if the negotiation is complete
-        if n.bid_value is not None and n.ask_value is not None:
-            logger.debug("negotiation data complete")
-            result = {"text": "data complete"}
-            
-            if n.bid_value >= n.ask_value:
-                result = {"text": "negotiation is possible"}
-            else:
-                result = {"text": "negotiation is not possible"}
-            
-            logger.debug(result)
-            return render(request, "mediate/result.html", {"result": result})
-        # 2. if not complete, find out what is missing
-        else:
-            logger.debug("negotiation data is not yet complete")
-            if id == n.bid_id and n.bid_value is None:
-                logger.debug("bid_id provided and value missing")
-                form = AnswerForm({"id":id, "type":"Bid", "provided_value": 0})
-                return render(request, "mediate/answer.html", {"form": form})
-            elif id == n.ask_id and n.ask_value is None:
-                logger.debug("ask_id provided and value missing")
-                form = AnswerForm({"id":id, "type":"Ask", "provided_value": 0})
-                return render(request, "mediate/answer.html", {"form": form})
-            elif id == n.ask_id and n.bid_value is None:
-                logger.debug("ask id provided and bid value still missing")
-                result = {"text": "bid value still missing"}
-                return render(request, "mediate/result.html", {"result": result})
-            elif id == n.bid_id and n.ask_value is None:
-                logger.debug("bid id provided and ask value still missing")
-                result = {"text": "ask value still missing"}
-                return render(request, "mediate/result.html", {"result": result})
-
-    
-    form = CheckForm()
-    logger.debug("no negotiation found")
-    return render(request, "mediate/check.html", {"form": form})
+    response = _render_for_token(request, token)
+    Negotiation.purge_expired()
+    return response
 
 
 def process(request):
-    """
-    process the answer from the other side
-    """
+    """Record the second reserve, once, then return to the result page."""
+    if request.method != "POST":
+        Negotiation.purge_expired()
+        return render(request, "mediate/check.html", {"form": CheckForm()})
+
+    form = AnswerForm(request.POST)
+    if not form.is_valid():
+        return render(request, "mediate/answer.html", {"form": form})
+
+    token = form.cleaned_data["id"]
+    negotiation = Negotiation.objects.filter(Q(bid_id=token) | Q(ask_id=token)).first()
+    if negotiation is None:
+        messages.warning(request, NOT_FOUND)
+        Negotiation.purge_expired()
+        return render(request, "mediate/check.html", {"form": CheckForm()})
+
+    side = "Bid" if token == negotiation.bid_id else "Ask"
+    if form.cleaned_data["type"] != side:
+        messages.warning(request, "invalid data")
+        Negotiation.purge_expired()
+        return render(request, "mediate/check.html", {"form": CheckForm()})
+
+    status = negotiation.submit_value(side, form.cleaned_data["provided_value"])
+    Negotiation.purge_expired()
+    if status == "expired":
+        return render(
+            request, "mediate/result.html", {"result": {"text": EXPIRED_INPUT}}
+        )
+    if status == "missing":
+        messages.warning(request, NOT_FOUND)
+        return render(request, "mediate/check.html", {"form": CheckForm()})
+    if status == "duplicate":
+        messages.info(request, ALREADY_SUBMITTED)
+    return HttpResponseRedirect(reverse("check", kwargs={"id": str(token)}))
+
+
+def build_share_qr(share_url):
+    """Return a base64 PNG of the share link. Raises if the logo cannot be read."""
+    logo_path = settings.BASE_DIR / "sw.jpg"
+    with Image.open(logo_path) as logo:
+        basewidth = 100
+        wpercent = basewidth / float(logo.size[0])
+        hsize = int(float(logo.size[1]) * float(wpercent))
+        resized = logo.resize((basewidth, hsize), Image.LANCZOS)
+        code = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_H)
+        code.add_data(share_url)
+        code.make(fit=True)
+        qr_image = code.make_image(
+            fill_color=(3, 103, 166), back_color="white"
+        ).convert("RGB")
+        pos = (
+            (qr_image.size[0] - resized.size[0]) // 2,
+            (qr_image.size[1] - resized.size[1]) // 2,
+        )
+        qr_image.paste(resized, pos)
+        stream = BytesIO()
+        qr_image.save(stream, format="PNG")
+    return base64.b64encode(stream.getvalue()).decode("ascii")
+
+
+def _token_from_request(request, raw_id):
+    if request.method == "GET" and raw_id is not None:
+        try:
+            return uuid.UUID(str(raw_id)), None
+        except ValueError:
+            messages.warning(request, INVALID_CODE)
+            return None, render(request, "mediate/check.html", {"form": CheckForm()})
 
     if request.method == "POST":
-        form = AnswerForm(request.POST)
-        if form.is_valid():
-            id = form.cleaned_data["id"]
-            type = form.cleaned_data["type"]
-            provided_value = form.cleaned_data["provided_value"]
-            if type == "Ask":
-                n = Negotiation.objects.get(ask_id=id)
-                n.ask_value = provided_value
-                n.save()
-                logger.debug("updated ask value")
-                return HttpResponseRedirect(reverse("check", kwargs={"id": str(id)}))
-            elif type == "Bid":
-                n = Negotiation.objects.get(bid_id=id)
-                n.bid_value = provided_value
-                n.save()
-                logger.debug("update bid value")
-                return HttpResponseRedirect(reverse("check", kwargs={"id": id}))
-                
-    form = CheckForm()
-    logger.debug("no negotiation found")
-    return render(request, "mediate/check.html", {"form": form})
+        form = CheckForm(request.POST)
+        if not form.is_valid():
+            messages.warning(request, "invalid data")
+            return None, render(request, "mediate/check.html", {"form": form})
+        return form.cleaned_data["id"], None
+
+    return None, None
+
+
+def _render_for_token(request, token):
+    negotiation = Negotiation.objects.filter(Q(bid_id=token) | Q(ask_id=token)).first()
+    if negotiation is None:
+        messages.warning(request, NOT_FOUND)
+        return render(request, "mediate/check.html", {"form": CheckForm()})
+
+    expired = negotiation.expire_if_needed()
+    if expired == "input":
+        return render(
+            request, "mediate/result.html", {"result": {"text": EXPIRED_INPUT}}
+        )
+    if expired == "display":
+        return render(
+            request, "mediate/result.html", {"result": {"text": EXPIRED_RESULT}}
+        )
+
+    negotiation.finalize_if_complete()
+    if negotiation.result is not None:
+        text = (
+            "negotiation is possible"
+            if negotiation.result
+            else "negotiation is not possible"
+        )
+        return render(request, "mediate/result.html", {"result": {"text": text}})
+
+    if token == negotiation.bid_id and negotiation.bid_value is None:
+        form = AnswerForm(initial={"id": token, "type": "Bid"})
+        return render(request, "mediate/answer.html", {"form": form})
+    if token == negotiation.ask_id and negotiation.ask_value is None:
+        form = AnswerForm(initial={"id": token, "type": "Ask"})
+        return render(request, "mediate/answer.html", {"form": form})
+    if token == negotiation.ask_id and negotiation.bid_value is None:
+        return render(
+            request,
+            "mediate/result.html",
+            {"result": {"text": "bid value still missing"}},
+        )
+    if token == negotiation.bid_id and negotiation.ask_value is None:
+        return render(
+            request,
+            "mediate/result.html",
+            {"result": {"text": "ask value still missing"}},
+        )
+
+    messages.warning(request, NOT_FOUND)
+    return render(request, "mediate/check.html", {"form": CheckForm()})
